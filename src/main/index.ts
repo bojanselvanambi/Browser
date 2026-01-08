@@ -48,17 +48,33 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(async () => {
-  // Wait for Widevine CDM to be ready (castLabs fork only)
-  if (components && components.whenReady) {
-    await components.whenReady()
-    console.log('[Widevine] CDM components ready')
-  } else {
-    console.log('[Widevine] Standard Electron - no Widevine support')
-  }
+// Single instance lock - prevents multiple app instances
+// and handles reopening when app is already running
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  // Another instance is already running, quit this one
+  app.quit()
+} else {
+  // Store mainWindow reference for second-instance handler
+  let mainWindowRef: BrowserWindow | null = null
+
+  app.on('second-instance', () => {
+    // Someone tried to run a second instance, focus our window
+    if (mainWindowRef) {
+      if (mainWindowRef.isMinimized()) mainWindowRef.restore()
+      mainWindowRef.focus()
+    }
+  })
+
+  // This method will be called when Electron has finished
+  // initialization and is ready to create browser windows.
+  // Some APIs can only be used after this event occurs.
+  app.whenReady().then(async () => {
+    // Wait for Widevine CDM to be ready (castLabs fork only)
+    if (components && components.whenReady) {
+      await components.whenReady()
+    }
 
   // Set app user model id for windows
   app.setAppUserModelId('com.electron')
@@ -81,10 +97,10 @@ app.whenReady().then(async () => {
     })
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+
 
   const mainWindow = createWindow()
+  mainWindowRef = mainWindow
   const viewManager = new ViewManager(mainWindow, app.getAppPath())
 
   // Downloads storage - must be before download tracking
@@ -106,7 +122,7 @@ app.whenReady().then(async () => {
   if (fs.existsSync(extPath)) {
     trailsSession.loadExtension(extPath).then((ext: { id: string }) => {
       uBlockId = ext.id
-      console.log('Adblock auto-loaded on startup:', uBlockId)
+
     }).catch((e: Error) => {
       console.error('Failed to auto-load Adblock:', e)
     })
@@ -359,7 +375,7 @@ app.whenReady().then(async () => {
             try {
                 const ext = await trailsSession.loadExtension(extPath)
                 uBlockId = ext.id
-                console.log('Adblock Loaded:', uBlockId)
+
             } catch (e) {
                 console.error('Failed to load Adblock:', e)
             }
@@ -369,7 +385,7 @@ app.whenReady().then(async () => {
             try {
                 trailsSession.removeExtension(uBlockId)
                 uBlockId = null
-                console.log('Adblock Removed')
+
             } catch (e) {
                 console.error('Failed to remove Adblock:', e)
             }
@@ -386,18 +402,22 @@ app.whenReady().then(async () => {
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const newWindow = createWindow()
+      mainWindowRef = newWindow
+    }
+  })
+
+  // Quit when all windows are closed, except on macOS. There, it's common
+  // for applications and their menu bar to stay active until the user quits
+  // explicitly with Cmd + Q.
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
   })
 })
-
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+}
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.

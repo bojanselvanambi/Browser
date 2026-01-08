@@ -133,7 +133,6 @@ function App(): React.JSX.Element {
     const paths = state.settings.extensionPaths || []
     const api = (window as any).api
     if (!api?.extensions?.load) {
-      console.log('[Extensions] Extension API not available')
       return
     }
     paths.forEach(async (path) => {
@@ -760,7 +759,7 @@ function App(): React.JSX.Element {
   }, [])
 
   const handleMoveTrail = useCallback((draggedId: string, targetId: string, position: 'inside' | 'before' | 'after') => {
-    console.log('[App] handleMoveTrail:', { draggedId, targetId, position })
+
 
     setState(prev => {
       const draggedNode = prev.nodes[draggedId]
@@ -781,7 +780,6 @@ function App(): React.JSX.Element {
 
       // VALIDATION: Check for self-reference (can't be child of self)
       if (newParentId === draggedId) {
-        console.log('[App] Blocked: cannot make node a child of itself')
         return prev
       }
 
@@ -790,7 +788,6 @@ function App(): React.JSX.Element {
         let check: typeof targetNode | undefined = prev.nodes[newParentId]
         while (check) {
           if (check.id === draggedId) {
-            console.log('[App] Blocked: cycle detected')
             return prev
           }
           check = check.parentId ? prev.nodes[check.parentId] : undefined
@@ -820,12 +817,6 @@ function App(): React.JSX.Element {
           isExpanded: true
         }
         newNodes[draggedId] = { ...draggedNode, parentId: targetId }
-        console.log('[App] Nested inside - set parentId:', {
-          draggedId,
-          targetId,
-          newParentId: newNodes[draggedId].parentId,
-          targetChildren: newNodes[targetId].children
-        })
       } else {
         // Add as sibling of target
         if (newParentId && newNodes[newParentId]) {
@@ -853,24 +844,17 @@ function App(): React.JSX.Element {
 
   // Simple function to move any trail to root level
   const handleMoveToRoot = useCallback((id: string) => {
-    console.log('[App] handleMoveToRoot called:', id)
+
     setState(prev => {
       const node = prev.nodes[id]
       if (!node) {
-        console.log('[App] handleMoveToRoot - node not found')
         return prev
       }
 
-      console.log('[App] handleMoveToRoot - node state:', {
-        id,
-        parentId: node.parentId,
-        inRootNodeIds: prev.rootNodeIds.includes(id),
-        rootNodeIds: prev.rootNodeIds
-      })
+
 
       // Already at root? Skip
       if (node.parentId === null && prev.rootNodeIds.includes(id)) {
-        console.log('[App] handleMoveToRoot - already at root (parentId is null)')
         return prev
       }
 
@@ -894,7 +878,7 @@ function App(): React.JSX.Element {
       // Update the node's parentId to null
       newNodes[id] = { ...node, parentId: null }
 
-      console.log('[App] handleMoveToRoot - SUCCESS')
+
       return {
         ...prev,
         nodes: newNodes,

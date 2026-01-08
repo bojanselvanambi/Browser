@@ -170,7 +170,7 @@ const TrailItemView = React.memo(({ node, depth, isActive }: TrailItemViewProps)
             : node.id
         e.dataTransfer.setData('text/plain', selectedIds)
         e.dataTransfer.effectAllowed = 'move'
-        console.log('[Drag] Started dragging:', node.id) // Debug
+
     }
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -208,23 +208,18 @@ const TrailItemView = React.memo(({ node, depth, isActive }: TrailItemViewProps)
         e.preventDefault()
         e.stopPropagation()
         const draggedIds = e.dataTransfer.getData('text/plain')
-        console.log('[Drag] Drop received:', { draggedIds, targetId: node.id, position: dragOverPosition })
 
         if (draggedIds) {
             const ids = draggedIds.split(',')
 
             ids.forEach(draggedId => {
-                if (draggedId === node.id) {
-                    console.log('[Drag] Skipping - dropped on self')
-                    return
-                }
+                if (draggedId === node.id) return
 
                 let position: 'inside' | 'before' | 'after' = 'after'
                 if (dragOverPosition === 'top') position = 'before'
                 else if (dragOverPosition === 'inside') position = 'inside'
-                else position = 'after' // bottom or left
+                else position = 'after'
 
-                console.log('[Drag] Calling onMoveTrail:', { draggedId, targetId: node.id, position })
                 onMoveTrail(draggedId, node.id, position)
             })
         }
