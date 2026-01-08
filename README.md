@@ -1,2 +1,2 @@
-# Browser
+# A Trails based Browser
 
