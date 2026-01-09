@@ -237,7 +237,7 @@ const TrailItemView = React.memo(({ node, depth, isActive }: TrailItemViewProps)
             onDrop={handleDrop}
         >
             <div
-                title={`Type: ${node.type} | ID: ${node.id}`}
+                title={node.customName || node.title || node.url || 'Untitled Trail'}
                 onClick={(e) => {
                     if (isEditing) return
 
@@ -397,7 +397,7 @@ interface SideBarProps {
     onBack: () => void
     onForward: () => void
     onReload: () => void
-    onAddTrail: () => void
+    onAddTrail: (url?: string) => void
     onCloseTrail: (id: string) => void
     onNavigate: (id: string, url: string) => void
     onRenameTrail: (id: string, customName: string) => void
@@ -413,14 +413,6 @@ interface SideBarProps {
     selectedNodeIds: string[]
     onToggleSelect: (id: string) => void
     onBulkDelete: () => void
-
-    // Lifted State Props
-    showSettingsMenu: boolean
-    setShowSettingsMenu: (show: boolean) => void
-    showHistoryMenu: boolean
-    setShowHistoryMenu: (show: boolean) => void
-    showDownloadsMenu: boolean
-    setShowDownloadsMenu: (show: boolean) => void
 
     // Adblock
     adblockEnabled: boolean
@@ -446,6 +438,100 @@ interface SideBarProps {
     onClickPinnedTab: (id: string) => void
     onUnpinTab: (id: string) => void
     onPinTab: (url: string, title: string, favicon?: string) => void
+}
+
+const NewTrailInput = ({ onAdd }: { onAdd: (url?: string) => void }) => {
+    const [isAdding, setIsAdding] = useState(false)
+    const [value, setValue] = useState('')
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    useEffect(() => {
+        if (isAdding && inputRef.current) {
+            inputRef.current.focus()
+        }
+    }, [isAdding])
+
+    const handleSubmit = () => {
+        if (value.trim()) {
+            onAdd(value.trim())
+        } else {
+            onAdd() // Default new tab
+        }
+        setIsAdding(false)
+        setValue('')
+    }
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSubmit()
+        } else if (e.key === 'Escape') {
+            setIsAdding(false)
+            setValue('')
+        }
+    }
+
+    if (!isAdding) {
+        return (
+            <div
+                onClick={() => setIsAdding(true)}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 8px',
+                    marginTop: '8px',
+                    borderTop: '1px solid #333',
+                    color: '#B0B0B0',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    transition: 'color 0.15s',
+                    userSelect: 'none'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = '#ccc'}
+                onMouseLeave={(e) => e.currentTarget.style.color = '#B0B0B0'}
+            >
+                <PlusIcon />
+                <span>New Trail</span>
+            </div>
+        )
+    }
+
+    return (
+        <div style={{
+            padding: '8px',
+            marginTop: '8px',
+            borderTop: '1px solid #333'
+        }}>
+            <input
+                ref={inputRef}
+                type="text"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={() => {
+                    // Optional: close on blur if empty? 
+                    // Better to keep open if user clicks away temporarily or keep logic simple
+                    // Let's close if empty, but keep if typed?
+                    // User might lose work. Let's just keep it open or close on Escape.
+                    // Actually, usually these things close on blur.
+                    // Let's close.
+                    if (!value) setIsAdding(false)
+                }}
+                placeholder="Search or enter URL..."
+                style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #555',
+                    borderRadius: '4px',
+                    color: 'white',
+                    fontSize: '13px',
+                    padding: '6px 8px',
+                    outline: 'none'
+                }}
+            />
+        </div>
+    )
 }
 
 export function Sidebar({
@@ -477,12 +563,6 @@ export function Sidebar({
     selectedNodeIds,
     onToggleSelect,
     onBulkDelete: _onBulkDelete,
-    showSettingsMenu,
-    setShowSettingsMenu,
-    showHistoryMenu,
-    setShowHistoryMenu,
-    showDownloadsMenu,
-    setShowDownloadsMenu,
     adblockEnabled,
     onToggleAdblock,
     onClearHistoryItem,
@@ -502,7 +582,10 @@ export function Sidebar({
 }: SideBarProps) {
     const [sidebarWidth, setSidebarWidth] = useState(280)
     const [isResizing, setIsResizing] = useState(false)
-    // Menu states lifted to parent
+    // Local menu states (no longer lifted to parent)
+    const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+    const [showHistoryMenu, setShowHistoryMenu] = useState(false)
+    const [showDownloadsMenu, setShowDownloadsMenu] = useState(false)
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, nodeId: string } | null>(null)
     const [_editNodeId, _setEditNodeId] = useState<string | null>(null)
     const sidebarRef = useRef<HTMLDivElement>(null)
@@ -578,17 +661,14 @@ export function Sidebar({
         y: number;
     }) => (
         <div
+            className="context-menu-glass"
             style={{
                 position: 'fixed',
                 top: y,
                 left: x,
                 minWidth: '160px',
-                backgroundColor: '#2a2a2a',
-                border: '1px solid #444',
-                borderRadius: '8px',
                 padding: '6px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                zIndex: 1000,
+                zIndex: 9999,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '2px'
@@ -808,28 +888,9 @@ export function Sidebar({
                     )}
 
                     {/* New Trails Button - inside scrollable area with separator */}
-                    <div
-                        onClick={onAddTrail}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '10px 8px',
-                            marginTop: '8px',
-                            borderTop: '1px solid #333',
-                            color: '#B0B0B0',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: 500,
-                            transition: 'color 0.15s',
-                            userSelect: 'none'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.color = '#ccc'}
-                        onMouseLeave={(e) => e.currentTarget.style.color = '#B0B0B0'}
-                    >
-                        <PlusIcon />
-                        <span>New Trail</span>
-                    </div>
+
+                    {/* New Trail Input / Button */}
+                    <NewTrailInput onAdd={onAddTrail} />
                 </div>
 
                 {/* History Panel */}

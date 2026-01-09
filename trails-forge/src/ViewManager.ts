@@ -1,4 +1,4 @@
-import { BrowserView, BrowserWindow, Menu, MenuItem, clipboard } from 'electron'
+import { BrowserView, BrowserWindow, Menu, MenuItem, clipboard, app } from 'electron'
 import path from 'path'
 
 interface ViewBounds {
@@ -24,12 +24,23 @@ class ViewManager {
   constructor(mainWindow: BrowserWindow, appPath: string) {
     this.mainWindow = mainWindow
     this.appPath = appPath
+    // Increase max listeners to avoid EventEmitter warning with many views
+    this.mainWindow.setMaxListeners(20)
   }
 
   createView(id: string, url: string, bounds: ViewBounds) {
     // Ensure url is defined
     if (!url) {
       url = 'about:blank'
+    }
+
+    // Handle trails:// protocol for internal pages
+    const resourcesPath = app.isPackaged ? process.resourcesPath : path.join(this.appPath, 'resources')
+    if (url.startsWith('trails://')) {
+      const pageName = url.replace('trails://', '')
+      // Convert Windows backslashes to forward slashes for file:// URL
+      const filePath = path.join(resourcesPath, `${pageName}.html`).replace(/\\/g, '/')
+      url = `file:///${filePath}`
     }
 
     if (this.views.has(id)) {
@@ -45,12 +56,13 @@ class ViewManager {
     
     let preloadPath: string | undefined
     if (isSettingsPage) {
-      preloadPath = path.join(this.appPath, 'resources', 'settings-preload.js')
+      preloadPath = path.join(resourcesPath, 'settings-preload.js')
     } else if (isDownloadsPage) {
-      preloadPath = path.join(this.appPath, 'resources', 'downloads-preload.js')
+      preloadPath = path.join(resourcesPath, 'downloads-preload.js')
     } else if (isArchivePage) {
-      preloadPath = path.join(this.appPath, 'resources', 'archive-preload.js')
+      preloadPath = path.join(resourcesPath, 'archive-preload.js')
     }
+
 
     // Use non-persistent partition for incognito trails
     // (Removed incognito logic: always use trail-browser partition)
@@ -63,7 +75,7 @@ class ViewManager {
         sandbox: isInternalPage ? false : true,
         partition,
 
-        preload: preloadPath || path.join(this.appPath, 'resources', 'view-preload.js')
+        preload: preloadPath || path.join(resourcesPath, 'view-preload.js')
       }
     })
 
@@ -75,8 +87,9 @@ class ViewManager {
     // Initial bounds (will be updated when active)
     view.setBounds(bounds)
 
-    // Inject media control script on page load
+    // Inject media control script and Custom Scrollbar on page load
     view.webContents.on('did-finish-load', () => {
+        // Media Control
         const script = `
 (function() {
     if (window.__trailsMediaControl) return;
@@ -97,6 +110,13 @@ class ViewManager {
 })();
 `
         view.webContents.executeJavaScript(script).catch(() => {})
+
+        // Custom Scrollbar
+        view.webContents.insertCSS(`
+            ::-webkit-scrollbar { width: 12px; background-color: #F5F5F5; }
+            ::-webkit-scrollbar-track { -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.3); border-radius: 10px; background-color: #F5F5F5; }
+            ::-webkit-scrollbar-thumb { border-radius: 10px; -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,.3); background-color: #555; }
+        `).catch(() => {})
     })
 
     view.webContents.on('did-navigate', (_, url) => {
@@ -140,6 +160,22 @@ class ViewManager {
         try {
             const currentDomain = new URL(currentUrl).hostname.replace('www.', '')
             const newDomain = new URL(url).hostname.replace('www.', '')
+            
+            // Skip redirect/tracking URLs from search engines - these are intermediate hops
+            // that would create duplicate trails. The final destination will trigger its own event.
+            const isRedirectUrl = 
+                url.includes('bing.com/ck/a') ||           // Bing redirect
+                url.includes('google.com/url?') ||          // Google redirect
+                url.includes('duckduckgo.com/l/?') ||       // DDG redirect
+                url.includes('ecosia.org/redirect?') ||     // Ecosia redirect
+                url.includes('t.co/') ||                    // Twitter/X redirect
+                url.includes('l.facebook.com/') ||          // Facebook redirect
+                url.includes('lnkd.in/')                    // LinkedIn redirect
+            
+            if (isRedirectUrl) {
+                // Allow navigation but don't create sub-trail
+                return
+            }
             
             // Only create sub-trail for cross-domain navigation
             if (currentDomain !== newDomain) {

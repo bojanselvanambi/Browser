@@ -1,7 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, session, nativeTheme } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import started from 'electron-squirrel-startup'
 import ViewManager from './ViewManager'
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+if (started) {
+  app.quit()
+}
 
 // Forge/Vite specific globals
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -15,13 +21,16 @@ function createWindow(): BrowserWindow {
     height: 670,
     show: true,
     autoHideMenuBar: true,
-    backgroundColor: '#121212',
+    backgroundMaterial: 'acrylic',  // Windows 11 native acrylic blur
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: '#00000000',
       symbolColor: '#74b1be',
-      height: 30
+      height: 32
     },
+    minimizable: true,
+    maximizable: true,
+    closable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       sandbox: false,
@@ -97,12 +106,33 @@ app.whenReady().then(() => {
   if (app.isPackaged) {
     extPath = path.join(process.resourcesPath, 'adblock', 'uBlock0.chromium')
   }
+  const adblockDebugInfo: Record<string, unknown> = {
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    extPath: extPath,
+    pathExists: fs.existsSync(extPath)
+  }
+  console.log('[ADBLOCK] Debug info:', adblockDebugInfo)
+  
+  // Handler for renderer to request adblock debug info
+  ipcMain.handle('get-adblock-debug', () => {
+    return adblockDebugInfo
+  })
+  
   if (fs.existsSync(extPath)) {
     trailsSession.loadExtension(extPath).then((ext: { id: string }) => {
       uBlockId = ext.id
+      console.log('[ADBLOCK] Extension loaded successfully, ID:', uBlockId)
+      adblockDebugInfo.loaded = true
+      adblockDebugInfo.extensionId = uBlockId
     }).catch((e: Error) => {
-      console.error('Failed to auto-load Adblock:', e)
+      console.error('[ADBLOCK] Failed to auto-load Adblock:', e)
+      adblockDebugInfo.loaded = false
+      adblockDebugInfo.error = e.message
     })
+  } else {
+    console.error('[ADBLOCK] Extension path does not exist!')
+    adblockDebugInfo.pathMissing = true
   }
 
   trailsSession.on('will-download', (_, item) => {
@@ -225,11 +255,25 @@ app.whenReady().then(() => {
       viewManager.showActiveView()
   })
 
+  ipcMain.on('open-path', (_, filePath) => {
+      shell.openPath(filePath)
+  })
+
+  ipcMain.on('show-in-folder', (_, filePath) => {
+      shell.showItemInFolder(filePath)
+  })
+
+  ipcMain.on('set-content-theme', (_, theme) => {
+    // Set nativeTheme.themeSource to affect BrowserView content (websites)
+    // 'system' | 'light' | 'dark'
+    nativeTheme.themeSource = theme === 'default' ? 'system' : theme
+  })
+
   ipcMain.handle('settings:getPath', async () => {
     if (!app.isPackaged) {
       return 'http://localhost:5173/settings.html'
     }
-    const settingsPath = path.join(__dirname, '../renderer/settings.html')
+    const settingsPath = path.join(__dirname, '../renderer/main_window/settings.html')
     return 'file://' + settingsPath.replace(/\\/g, '/')
   })
 
@@ -253,7 +297,7 @@ app.whenReady().then(() => {
     if (!app.isPackaged) {
       return 'http://localhost:5173/downloads.html'
     }
-    const downloadsPath = path.join(__dirname, '../renderer/downloads.html')
+    const downloadsPath = path.join(__dirname, '../renderer/main_window/downloads.html')
     return 'file://' + downloadsPath.replace(/\\/g, '/')
   })
 
@@ -263,6 +307,14 @@ app.whenReady().then(() => {
 
   ipcMain.on('downloads:openFolder', async () => {
     shell.openPath(app.getPath('downloads'))
+  })
+
+  ipcMain.on('downloads:openFile', (_, path) => {
+    shell.openPath(path)
+  })
+
+  ipcMain.on('downloads:showInFolder', (_, path) => {
+    shell.showItemInFolder(path)
   })
 
   ipcMain.on('downloads:remove', (_, id) => {
@@ -277,7 +329,7 @@ app.whenReady().then(() => {
     if (!app.isPackaged) {
       return 'http://localhost:5173/archive.html'
     }
-    const archivePath = path.join(__dirname, '../renderer/archive.html')
+    const archivePath = path.join(__dirname, '../renderer/main_window/archive.html')
     return 'file://' + archivePath.replace(/\\/g, '/')
   })
 

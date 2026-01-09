@@ -4,12 +4,26 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: true,
+    icon: 'resources/icon',
+    extraResource: [
+      './resources/settings.html',
+      './resources/downloads.html',
+      './resources/archive.html',
+      './resources/settings-preload.js',
+      './resources/downloads-preload.js',
+      './resources/archive-preload.js',
+      './resources/media-inject.js',
+      './resources/view-preload.js',
+      './resources/adblock'
+    ]
   },
   rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: {},
+      config: {
+        setupIcon: './resources/icon.ico'
+      },
     },
     {
       name: '@electron-forge/maker-zip',

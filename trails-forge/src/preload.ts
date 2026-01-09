@@ -16,6 +16,9 @@ const api = {
     destroyView: (id: string) => ipcRenderer.send('destroy-view', id),
     hideView: () => ipcRenderer.send('hide-view'),
     showView: () => ipcRenderer.send('show-view'),
+    openPath: (path: string) => ipcRenderer.send('open-path', path),
+    showInFolder: (path: string) => ipcRenderer.send('show-in-folder', path),
+    setContentTheme: (theme: 'default' | 'light' | 'dark') => ipcRenderer.send('set-content-theme', theme),
 
     onViewTitleUpdated: (callback: (event: unknown, data: { id: string; title: string }) => void) =>
       ipcRenderer.on('view-title-updated', callback),
@@ -43,6 +46,9 @@ const api = {
       ipcRenderer.on('view-media-paused', callback),
     mediaControl: (id: string, action: 'play' | 'pause' | 'forward' | 'backward' | 'togglePiP') =>
       ipcRenderer.send('media-control', { id, action }),
+    onAdblockDebug: (callback: (event: unknown, data: unknown) => void) =>
+      ipcRenderer.on('adblock-debug', callback),
+    getAdblockDebug: () => ipcRenderer.invoke('get-adblock-debug'),
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('view-title-updated')
       ipcRenderer.removeAllListeners('view-navigated')
@@ -73,6 +79,8 @@ const api = {
   },
   settings: {
     getPath: () => ipcRenderer.invoke('settings:getPath'),
+    setSearchEngine: (engine: string) => ipcRenderer.send('settings:setSearchEngine', engine),
+    setAdblock: (enabled: boolean) => ipcRenderer.send('settings:setAdblock', enabled),
     onSearchEngineChanged: (callback: (event: unknown, engine: string) => void) =>
       ipcRenderer.on('settings:searchEngineChanged', callback),
     onAdblockChanged: (callback: (event: unknown, enabled: boolean) => void) =>
@@ -94,6 +102,29 @@ const api = {
   }
 }
 
+// Dedicated APIs for internal pages (Settings, Downloads, Archive)
+const settingsAPI = {
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSearchEngine: (engine: string) => ipcRenderer.send('settings:setSearchEngine', engine),
+  setAdblock: (enabled: boolean) => ipcRenderer.send('settings:setAdblock', enabled)
+}
+
+const downloadsAPI = {
+  getDownloads: () => ipcRenderer.invoke('downloads:get'),
+  openFile: (path: string) => ipcRenderer.send('downloads:openFile', path),
+  showInFolder: (path: string) => ipcRenderer.send('downloads:showInFolder', path),
+  removeDownload: (id: string) => ipcRenderer.send('downloads:remove', id),
+  clearAll: () => ipcRenderer.send('downloads:clearAll'),
+  openDownloadsFolder: () => ipcRenderer.send('downloads:openFolder')
+}
+
+const archiveAPI = {
+  getArchive: () => ipcRenderer.invoke('archive:get'),
+  restore: (id: string) => ipcRenderer.send('archive:restore', id),
+  delete: (id: string) => ipcRenderer.send('archive:delete', id),
+  clearAll: () => ipcRenderer.send('archive:clearAll')
+}
+
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
@@ -101,6 +132,9 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('settingsAPI', settingsAPI)
+    contextBridge.exposeInMainWorld('downloadsAPI', downloadsAPI)
+    contextBridge.exposeInMainWorld('archiveAPI', archiveAPI)
   } catch (error) {
     console.error(error)
   }
@@ -109,4 +143,10 @@ if (process.contextIsolated) {
   window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.api = api
+  // @ts-ignore (define in dts)
+  window.settingsAPI = settingsAPI
+  // @ts-ignore (define in dts)
+  window.downloadsAPI = downloadsAPI
+  // @ts-ignore (define in dts)
+  window.archiveAPI = archiveAPI
 }

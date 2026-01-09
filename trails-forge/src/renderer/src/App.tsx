@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { Toast, ToastMessage } from './components/Toast'
 
-import { TrailsState, TrailNode, ClosedTrailEntry, DownloadItem, SearchEngine, SEARCH_ENGINE_URLS } from './types'
+import { TrailsState, TrailNode, ClosedTrailEntry, DownloadItem, SearchEngine, ContentTheme, SEARCH_ENGINE_URLS } from './types'
 import { ArrowClockwiseIcon, HamburgerIcon, ArchiveIcon, DownloadIcon, SettingsIcon, SidebarIcon } from './components/Icons'
 
 const IconButton = ({ onClick, children, title }: { onClick: () => void, children: React.ReactNode, title?: string }) => (
@@ -33,6 +33,9 @@ const IconButton = ({ onClick, children, title }: { onClick: () => void, childre
 // Simple ID generator
 const generateId = () => Math.random().toString(36).substr(2, 9)
 
+// URL deduplication: Track recently created trail URLs to prevent duplicates
+const recentlyCreatedUrls = new Map<string, number>()
+
 function App(): React.JSX.Element {
 
 
@@ -53,12 +56,12 @@ function App(): React.JSX.Element {
   }, [adblockEnabled])
 
 
-  // Menu State (Lifted from Sidebar)
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false)
-  const [showHistoryMenu, setShowHistoryMenu] = useState(false)
-  const [showDownloadsMenu, setShowDownloadsMenu] = useState(false)
+  // Menu State
   const [showMainMenu, setShowMainMenu] = useState(false)
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false)
+
+  // Active page state: 'main' shows BrowserViews, others show inline panels
+  const [activePage, setActivePage] = useState<'main' | 'settings' | 'downloads' | 'archive'>('main')
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
@@ -94,8 +97,9 @@ function App(): React.JSX.Element {
           d.state === 'progressing' ? { ...d, state: 'interrupted' } : d
         )
         // Ensure settings exist
-        if (!parsed.settings) parsed.settings = { searchEngine: 'grok', extensionPaths: [] }
+        if (!parsed.settings) parsed.settings = { searchEngine: 'grok', extensionPaths: [], contentTheme: 'default' }
         if (!parsed.settings.extensionPaths) parsed.settings.extensionPaths = []
+        if (!parsed.settings.contentTheme) parsed.settings.contentTheme = 'default'
         // Migration: Ensure type exists
         if (parsed.nodes) {
           Object.values(parsed.nodes).forEach((n: any) => {
@@ -118,7 +122,7 @@ function App(): React.JSX.Element {
       rootNodeIds: [],
       closedTrails: [],
       downloads: [],
-      settings: { searchEngine: 'grok', extensionPaths: [] },
+      settings: { searchEngine: 'grok', extensionPaths: [], contentTheme: 'default' },
       selectedNodeIds: [],
       pinnedTabs: []
     }
@@ -131,6 +135,32 @@ function App(): React.JSX.Element {
     }, 500)
     return () => clearTimeout(timeout)
   }, [state])
+
+  // Hide/Show BrowserView when switching to internal pages
+  useEffect(() => {
+    const api = (window as any).api
+    if (activePage === 'main') {
+      api?.trails?.showView?.()
+    } else {
+      api?.trails?.hideView?.()
+    }
+  }, [activePage])
+
+  // Request adblock debug info from main process
+  useEffect(() => {
+    const api = (window as any).api
+    // Delay to allow extension to finish loading
+    setTimeout(async () => {
+      if (api?.trails?.getAdblockDebug) {
+        try {
+          const debugInfo = await api.trails.getAdblockDebug()
+          console.log('[ADBLOCK DEBUG]', debugInfo)
+        } catch (e) {
+          console.error('[ADBLOCK DEBUG] Failed to get info:', e)
+        }
+      }
+    }, 2000)
+  }, [])
 
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -284,6 +314,18 @@ function App(): React.JSX.Element {
     })
 
     window.api.trails.onViewNewWindow((_, { sourceId, url }) => {
+      // Deduplicate: Skip if this URL was recently created (within 1 second)
+      const now = Date.now()
+      const lastCreated = recentlyCreatedUrls.get(url)
+      if (lastCreated && now - lastCreated < 1000) {
+        return
+      }
+      recentlyCreatedUrls.set(url, now)
+      // Cleanup old entries
+      for (const [u, t] of recentlyCreatedUrls) {
+        if (now - t > 2000) recentlyCreatedUrls.delete(u)
+      }
+
       const newId = generateId()
 
       setState(prev => {
@@ -381,6 +423,18 @@ function App(): React.JSX.Element {
 
     // AUTOMATIC SUB-TRAIL CREATION: Every link click creates a child trail
     window.api.trails.onViewLinkClicked((_, { sourceId, url }) => {
+      // Deduplicate: Skip if this URL was recently created (within 1 second)
+      const now = Date.now()
+      const lastCreated = recentlyCreatedUrls.get(url)
+      if (lastCreated && now - lastCreated < 1000) {
+        return
+      }
+      recentlyCreatedUrls.set(url, now)
+      // Cleanup old entries
+      for (const [u, t] of recentlyCreatedUrls) {
+        if (now - t > 2000) recentlyCreatedUrls.delete(u)
+      }
+
       const newId = generateId()
 
       setState(prev => {
@@ -728,19 +782,45 @@ function App(): React.JSX.Element {
     }
   }, [state.activeNodeId])
 
-  const handleAddTrail = useCallback(() => {
+  const handleAddTrail = useCallback((initialInput?: string) => {
     const id = generateId()
 
-    let startUrl = 'https://grok.com'
-    if (state.settings.searchEngine === 'google') startUrl = 'https://google.com'
-    else if (state.settings.searchEngine === 'duckduckgo') startUrl = 'https://duckduckgo.com'
-    else if (state.settings.searchEngine === 'bing') startUrl = 'https://bing.com'
-    else if (state.settings.searchEngine === 'ecosia') startUrl = 'https://ecosia.org'
+    let startUrl = 'https://grok.com' // DefaultFallback
+
+    // Determine start URL based on input
+    if (initialInput) {
+      // Simple heuristic: if it has a dot and no spaces, assume URL. Otherwise search.
+      // Or if it starts with http/https.
+      const hasProtocol = initialInput.startsWith('http://') || initialInput.startsWith('https://') || initialInput.startsWith('file://')
+      const hasSpace = initialInput.includes(' ')
+      const hasDot = initialInput.includes('.')
+
+      if (hasProtocol) {
+        startUrl = initialInput
+      } else if (hasDot && !hasSpace) {
+        startUrl = 'https://' + initialInput
+      } else {
+        // Search
+        if (state.settings.searchEngine === 'google') startUrl = `https://google.com/search?q=${encodeURIComponent(initialInput)}`
+        else if (state.settings.searchEngine === 'duckduckgo') startUrl = `https://duckduckgo.com/?q=${encodeURIComponent(initialInput)}`
+        else if (state.settings.searchEngine === 'bing') startUrl = `https://bing.com/search?q=${encodeURIComponent(initialInput)}`
+        else if (state.settings.searchEngine === 'ecosia') startUrl = `https://www.ecosia.org/search?q=${encodeURIComponent(initialInput)}`
+        else startUrl = `https://grok.com/search?q=${encodeURIComponent(initialInput)}`
+      }
+    } else {
+      // No input -> New Tab Page
+      if (state.settings.searchEngine === 'google') startUrl = 'https://google.com'
+      else if (state.settings.searchEngine === 'duckduckgo') startUrl = 'https://duckduckgo.com'
+      else if (state.settings.searchEngine === 'bing') startUrl = 'https://bing.com'
+      else if (state.settings.searchEngine === 'ecosia') startUrl = 'https://ecosia.org'
+      else startUrl = 'https://grok.com'
+    }
+
 
     const newNode: TrailNode = {
       id,
       url: startUrl,
-      title: 'New Tab',
+      title: initialInput || 'New Tab',
       parentId: null,
       children: [],
       timestamp: Date.now(),
@@ -830,6 +910,47 @@ function App(): React.JSX.Element {
       nodes: { ...prev.nodes, [id]: newNode },
       rootNodeIds: [...prev.rootNodeIds, id]
     }))
+  }, [])
+
+  // Open internal pages (settings, downloads, archive) as trail nodes
+  const handleOpenInternalPage = useCallback((page: 'settings' | 'downloads' | 'archive') => {
+    const id = generateId()
+    const pageInfo = {
+      settings: { url: 'trails://settings', title: '⚙️ Settings' },
+      downloads: { url: 'trails://downloads', title: '📥 Downloads' },
+      archive: { url: 'trails://archive', title: '📁 Archive' }
+    }
+    const { url, title } = pageInfo[page]
+
+    const newNode: TrailNode = {
+      id,
+      url,
+      title,
+      parentId: null,
+      children: [],
+      timestamp: Date.now(),
+      isExpanded: true,
+      type: 'link'
+    }
+
+    setState(prev => ({
+      ...prev,
+      nodes: { ...prev.nodes, [id]: newNode },
+      rootNodeIds: [...prev.rootNodeIds, id],
+      activeNodeId: id,
+      activePinnedTabId: null
+    }))
+
+    if (contentRef.current) {
+      const rect = contentRef.current.getBoundingClientRect()
+      window.api.trails.createTrailView(id, url, {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      })
+      window.api.trails.setActiveView(id)
+    }
   }, [])
 
   const handleMoveTrail = useCallback((draggedId: string, targetId: string, position: 'inside' | 'before' | 'after') => {
@@ -1193,6 +1314,7 @@ function App(): React.JSX.Element {
       ...prev,
       settings: { ...prev.settings, searchEngine: engine }
     }))
+    window.api.settings.setSearchEngine(engine)
   }, [])
 
   const handleRenameTrail = useCallback((id: string, customName: string) => {
@@ -1447,48 +1569,26 @@ function App(): React.JSX.Element {
     return () => document.removeEventListener('click', handleClickOutside)
   }, [showMainMenu])
 
-  // Close history menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => setShowHistoryMenu(false)
-    if (showHistoryMenu) {
-      document.addEventListener('click', handleClickOutside)
-    }
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [showHistoryMenu])
-
-  // Close downloads menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => setShowDownloadsMenu(false)
-    if (showDownloadsMenu) {
-      document.addEventListener('click', handleClickOutside)
-    }
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [showDownloadsMenu])
-
-  // Close settings menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => setShowSettingsMenu(false)
-    if (showSettingsMenu) {
-      document.addEventListener('click', handleClickOutside)
-    }
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [showSettingsMenu])
-
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: '#121212' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: 'transparent' }}>
       {/* Draggable Title Bar - compact height */}
       <div
         style={{
           height: '32px',
           width: '100%',
-          backgroundColor: '#121212',
+          backgroundColor: 'rgba(18, 18, 18, 0.75)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           WebkitAppRegion: 'drag',
           flexShrink: 0,
           display: isVideoFullscreen ? 'none' : 'flex',
           alignItems: 'center',
           gap: '6px',
-          padding: '0 8px'
+          padding: '0 8px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          position: 'relative',
+          zIndex: 10000
         } as any}
       >
         <div style={{ WebkitAppRegion: 'no-drag', position: 'relative' } as any}>
@@ -1497,130 +1597,46 @@ function App(): React.JSX.Element {
           </IconButton>
           {showMainMenu && (
             <div
+              className="context-menu-glass"
               style={{
                 position: 'absolute',
                 top: '100%',
                 left: 0,
-                backgroundColor: '#1E1E1E',
-                border: '1px solid #444444',
-                borderRadius: '6px',
                 padding: '4px',
-                zIndex: 1000,
-                minWidth: '140px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                zIndex: 9999,
+                minWidth: '140px'
               }}
               onClick={(e) => e.stopPropagation()}
             >
               <div
-                onClick={async () => {
+                onClick={() => {
                   setShowMainMenu(false)
-                  // Get settings page path from main process
-                  const settingsUrl = await window.api.settings.getPath()
-                  // Open settings as a Trail page
-                  const id = Math.random().toString(36).substr(2, 9)
-                  const settingsNode: TrailNode = {
-                    id,
-                    url: settingsUrl,
-                    title: 'Settings',
-                    timestamp: Date.now(),
-                    parentId: null,
-                    children: [],
-                    type: 'link'
-                  }
-                  setState(prev => ({
-                    ...prev,
-                    nodes: { ...prev.nodes, [id]: settingsNode },
-                    rootNodeIds: [...prev.rootNodeIds, id],
-                    activeNodeId: id
-                  }))
-                  if (contentRef.current) {
-                    const rect = contentRef.current.getBoundingClientRect()
-                    window.api.trails.createTrailView(id, settingsUrl, {
-                      x: Math.round(rect.x),
-                      y: Math.round(rect.y),
-                      width: Math.round(rect.width),
-                      height: Math.round(rect.height)
-                    })
-                    window.api.trails.setActiveView(id)
-                  }
+                  handleOpenInternalPage('settings')
                 }}
-                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#E0E0E0', fontSize: '13px' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2a2a2a')}
+                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#FFFFFF', fontSize: '13px' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3a3a3a')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <SettingsIcon /> Settings
               </div>
               <div
-                onClick={async () => {
+                onClick={() => {
                   setShowMainMenu(false)
-                  // Open archive as a Trail page
-                  const archiveUrl = await window.api.archive.getPath()
-                  const id = Math.random().toString(36).substr(2, 9)
-                  const archiveNode: TrailNode = {
-                    id,
-                    url: archiveUrl,
-                    title: 'Archive',
-                    timestamp: Date.now(),
-                    parentId: null,
-                    children: [],
-                    type: 'link'
-                  }
-                  setState(prev => ({
-                    ...prev,
-                    nodes: { ...prev.nodes, [id]: archiveNode },
-                    rootNodeIds: [...prev.rootNodeIds, id],
-                    activeNodeId: id
-                  }))
-                  if (contentRef.current) {
-                    const rect = contentRef.current.getBoundingClientRect()
-                    window.api.trails.createTrailView(id, archiveUrl, {
-                      x: Math.round(rect.x),
-                      y: Math.round(rect.y),
-                      width: Math.round(rect.width),
-                      height: Math.round(rect.height)
-                    })
-                  }
+                  handleOpenInternalPage('archive')
                 }}
-                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#E0E0E0', fontSize: '13px' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2a2a2a')}
+                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#FFFFFF', fontSize: '13px' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3a3a3a')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <ArchiveIcon /> Archive
               </div>
               <div
-                onClick={async () => {
+                onClick={() => {
                   setShowMainMenu(false)
-                  // Open downloads as a Trail page
-                  const downloadsUrl = await window.api.downloads.getPath()
-                  const id = Math.random().toString(36).substr(2, 9)
-                  const downloadsNode: TrailNode = {
-                    id,
-                    url: downloadsUrl,
-                    title: 'Downloads',
-                    timestamp: Date.now(),
-                    parentId: null,
-                    children: [],
-                    type: 'link'
-                  }
-                  setState(prev => ({
-                    ...prev,
-                    nodes: { ...prev.nodes, [id]: downloadsNode },
-                    rootNodeIds: [...prev.rootNodeIds, id],
-                    activeNodeId: id
-                  }))
-                  if (contentRef.current) {
-                    const rect = contentRef.current.getBoundingClientRect()
-                    window.api.trails.createTrailView(id, downloadsUrl, {
-                      x: Math.round(rect.x),
-                      y: Math.round(rect.y),
-                      width: Math.round(rect.width),
-                      height: Math.round(rect.height)
-                    })
-                    window.api.trails.setActiveView(id)
-                  }
+                  handleOpenInternalPage('downloads')
                 }}
-                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#E0E0E0', fontSize: '13px' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2a2a2a')}
+                style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: '#FFFFFF', fontSize: '13px' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3a3a3a')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <DownloadIcon /> Downloads
@@ -1671,12 +1687,6 @@ function App(): React.JSX.Element {
           onToggleAdblock={handleToggleAdblock}
           onClearHistoryItem={handleClearHistoryItem}
           onClearAllHistory={handleClearAllHistory}
-          showSettingsMenu={showSettingsMenu}
-          setShowSettingsMenu={setShowSettingsMenu}
-          showHistoryMenu={showHistoryMenu}
-          setShowHistoryMenu={setShowHistoryMenu}
-          showDownloadsMenu={showDownloadsMenu}
-          setShowDownloadsMenu={setShowDownloadsMenu}
           currentMedia={state.currentMedia}
           onMediaPlay={() => state.currentMedia && window.api.trails.mediaControl(state.currentMedia.trailId, 'play')}
           onMediaPause={() => state.currentMedia && window.api.trails.mediaControl(state.currentMedia.trailId, 'pause')}
@@ -1691,8 +1701,149 @@ function App(): React.JSX.Element {
           onUnpinTab={handleUnpinTab}
           onPinTab={handlePinTab}
         />}
-        <div ref={contentRef} style={{ flex: 1, backgroundColor: '#000' }}>
-          {/* BrowserView sits here */}
+        <div ref={contentRef} style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
+          {/* BrowserView sits here when activePage is 'main' */}
+
+          {/* Inline Settings Panel */}
+          {activePage === 'settings' && (
+            <div style={{ position: 'absolute', inset: 0, backgroundColor: '#121212', color: '#E0E0E0', overflow: 'auto', padding: '40px' }}>
+              <button onClick={() => setActivePage('main')} style={{ background: '#2a2a2a', border: 'none', color: '#E0E0E0', padding: '8px 16px', borderRadius: '6px', marginBottom: '24px', cursor: 'pointer' }}>← Back</button>
+              <h1 style={{ fontSize: '28px', fontWeight: 500, color: '#FC93AD', marginBottom: '32px' }}>⚙️ Settings</h1>
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#B0B0B0', marginBottom: '16px' }}>Search</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#1E1E1E', borderRadius: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '15px' }}>Default Search Engine</div>
+                    <div style={{ fontSize: '13px', color: '#B0B0B0', marginTop: '4px' }}>Choose your preferred search engine for new trails</div>
+                  </div>
+                  <select
+                    value={state.settings.searchEngine}
+                    onChange={(e) => handleSetSearchEngine(e.target.value as SearchEngine)}
+                    style={{ background: '#2a2a2a', color: '#E0E0E0', border: '1px solid #444444', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', minWidth: '150px' }}
+                  >
+                    <option value="grok">Grok</option>
+                    <option value="google">Google</option>
+                    <option value="duckduckgo">DuckDuckGo</option>
+                    <option value="bing">Bing</option>
+                    <option value="ecosia">Ecosia</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#B0B0B0', marginBottom: '16px' }}>Appearance</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#1E1E1E', borderRadius: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '15px' }}>Content Theme</div>
+                    <div style={{ fontSize: '13px', color: '#B0B0B0', marginTop: '4px' }}>Force light or dark mode on websites</div>
+                  </div>
+                  <select
+                    value={state.settings.contentTheme}
+                    onChange={(e) => {
+                      const theme = e.target.value as ContentTheme
+                      setState(prev => ({ ...prev, settings: { ...prev.settings, contentTheme: theme } }))
+                        ; (window as any).api?.trails?.setContentTheme?.(theme)
+                    }}
+                    style={{ background: '#2a2a2a', color: '#E0E0E0', border: '1px solid #444444', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', minWidth: '150px' }}
+                  >
+                    <option value="default">System Default</option>
+                    <option value="light">Light Mode</option>
+                    <option value="dark">Dark Mode</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: '#B0B0B0', marginBottom: '16px' }}>Privacy</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#1E1E1E', borderRadius: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '15px' }}>Content Blocking (uBlock Origin)</div>
+                    <div style={{ fontSize: '13px', color: '#B0B0B0', marginTop: '4px' }}>Block ads and trackers for a faster browsing experience</div>
+                  </div>
+                  <div
+                    onClick={handleToggleAdblock}
+                    style={{ width: '44px', height: '24px', background: adblockEnabled ? '#FC93AD' : '#444444', borderRadius: '12px', position: 'relative', cursor: 'pointer', transition: 'background 0.2s' }}
+                  >
+                    <div style={{ width: '20px', height: '20px', background: 'white', borderRadius: '50%', position: 'absolute', top: '2px', left: adblockEnabled ? '22px' : '2px', transition: 'left 0.2s' }} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', color: '#B0B0B0', fontSize: '13px', marginTop: '48px' }}>Trails Browser v1.0.0</div>
+            </div>
+          )}
+
+          {/* Inline Downloads Panel */}
+          {activePage === 'downloads' && (
+            <div style={{ position: 'absolute', inset: 0, backgroundColor: '#121212', color: '#E0E0E0', overflow: 'auto', padding: '40px' }}>
+              <button onClick={() => setActivePage('main')} style={{ background: '#2a2a2a', border: 'none', color: '#E0E0E0', padding: '8px 16px', borderRadius: '6px', marginBottom: '24px', cursor: 'pointer' }}>← Back</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+                <h1 style={{ fontSize: '28px', fontWeight: 500, color: '#FC93AD', margin: 0 }}>📥 Downloads</h1>
+                {state.downloads.length > 0 && (
+                  <button onClick={() => setState(prev => ({ ...prev, downloads: [] }))} style={{ background: '#ef4444', border: 'none', color: 'white', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>Clear All</button>
+                )}
+              </div>
+              {state.downloads.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#B0B0B0' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📥</div>
+                  <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#E0E0E0' }}>No downloads yet</h2>
+                  <p>Your downloads will appear here</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {state.downloads.map((d) => (
+                    <div key={d.id} style={{ background: '#1E1E1E', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '15px', fontWeight: 500 }}>{d.filename}</div>
+                          <div style={{ fontSize: '12px', color: '#B0B0B0', marginTop: '4px', wordBreak: 'break-all' }}>{d.savePath || d.url}</div>
+                          <div style={{ fontSize: '12px', color: d.state === 'completed' ? '#22c55e' : d.state === 'interrupted' ? '#ef4444' : '#FC93AD', marginTop: '8px' }}>
+                            {d.state === 'progressing' ? `Downloading... ${Math.round((d.receivedBytes / d.totalBytes) * 100)}%` : d.state.charAt(0).toUpperCase() + d.state.slice(1)}
+                          </div>
+                        </div>
+                        <button onClick={() => setState(prev => ({ ...prev, downloads: prev.downloads.filter(dl => dl.id !== d.id) }))} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', padding: '4px' }} title="Remove">✕</button>
+                      </div>
+                      {d.state === 'completed' && d.savePath && (
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                          <button onClick={() => (window as any).api?.trails?.openPath?.(d.savePath)} style={{ background: '#2a2a2a', border: 'none', color: '#E0E0E0', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>📂 Open File</button>
+                          <button onClick={() => (window as any).api?.trails?.showInFolder?.(d.savePath)} style={{ background: '#2a2a2a', border: 'none', color: '#E0E0E0', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>📁 Show in Folder</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inline Archive Panel */}
+          {activePage === 'archive' && (
+            <div style={{ position: 'absolute', inset: 0, backgroundColor: '#121212', color: '#E0E0E0', overflow: 'auto', padding: '40px' }}>
+              <button onClick={() => setActivePage('main')} style={{ background: '#2a2a2a', border: 'none', color: '#E0E0E0', padding: '8px 16px', borderRadius: '6px', marginBottom: '24px', cursor: 'pointer' }}>← Back</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+                <h1 style={{ fontSize: '28px', fontWeight: 500, color: '#FC93AD', margin: 0 }}>📦 Archive</h1>
+                {state.closedTrails.length > 0 && (
+                  <button onClick={handleClearAllHistory} style={{ background: '#ef4444', border: 'none', color: 'white', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>Clear All</button>
+                )}
+              </div>
+              {state.closedTrails.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#B0B0B0' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📦</div>
+                  <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#E0E0E0' }}>No archived trails</h2>
+                  <p>Closed trails will appear here</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {state.closedTrails.map((entry) => (
+                    <div key={entry.id} style={{ background: '#1E1E1E', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div onClick={() => { handleRestoreClosedTrail(entry.id); setActivePage('main'); }} style={{ cursor: 'pointer', flex: 1 }}>
+                        <div style={{ fontSize: '14px' }}>{entry.rootNode.title || 'Untitled'}</div>
+                        <div style={{ fontSize: '12px', color: '#888' }}>{entry.rootNode.url}</div>
+                      </div>
+                      <button onClick={() => setState(prev => ({ ...prev, closedTrails: prev.closedTrails.filter(t => t.id !== entry.id) }))} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', padding: '4px' }} title="Delete">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1700,7 +1851,7 @@ function App(): React.JSX.Element {
 
       {/* Toast Notifications */}
       <Toast messages={toasts} onDismiss={dismissToast} />
-    </div>
+    </div >
   )
 }
 

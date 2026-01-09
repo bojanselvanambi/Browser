@@ -44,9 +44,12 @@ export interface MediaState {
 
 export type SearchEngine = 'grok' | 'google' | 'duckduckgo' | 'bing' | 'ecosia'
 
+export type ContentTheme = 'default' | 'light' | 'dark'
+
 export interface Settings {
   searchEngine: SearchEngine
   extensionPaths?: string[]
+  contentTheme: ContentTheme
 }
 
 export const SEARCH_ENGINE_URLS: Record<SearchEngine, string> = {
