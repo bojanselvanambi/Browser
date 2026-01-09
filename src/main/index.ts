@@ -1,36 +1,49 @@
-import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
+import electron from 'electron'
+import type { BrowserWindow as BrowserWindowType } from 'electron'
 import { join } from 'path'
-import icon from '../../resources/Icon.png?asset'
+import icon from '../../resources/icon.png?asset'
 import ViewManager from './ViewManager'
 
-// castLabs Widevine components (only available in castLabs Electron fork)
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const electron = require('electron')
-const components = electron.components as { whenReady: () => Promise<void> } | undefined
+const { app, shell, BrowserWindow, ipcMain, session } = electron
 
-function createWindow(): BrowserWindow {
+function createWindow(): BrowserWindowType {
+  console.error('DEBUG: createWindow() called')
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
-    show: false,
+    show: true,
     autoHideMenuBar: true,
     backgroundColor: '#121212',
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#121212',
-      symbolColor: '#E0E0E0',
-      height: 32
+      color: '#00000000',
+      symbolColor: '#74b1be',
+      height: 30
     },
-    icon,
+    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false
     }
   })
+  console.error('DEBUG: BrowserWindow created')
+  console.error('DEBUG: BrowserWindow created')
+  
+  // Ensure window is centered on screen
+  mainWindow.center()
+  console.error('DEBUG: Window centered')
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  // Fallback: ensure window shows even if ready-to-show never fires
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.error('DEBUG: did-finish-load')
+    if (!mainWindow.isDestroyed()) mainWindow.show()
+  })
+  mainWindow.webContents.on('did-fail-load', (_, errorCode, errorDescription) => {
+    console.error('DEBUG: did-fail-load', errorCode, errorDescription)
+    if (!mainWindow.isDestroyed()) mainWindow.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -41,40 +54,44 @@ function createWindow(): BrowserWindow {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (process.env['ELECTRON_RENDERER_URL']) {
+    console.error('DEBUG: Loading dev URL:', process.env['ELECTRON_RENDERER_URL'])
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    const htmlPath = join(__dirname, '../renderer/index.html')
+    console.error('DEBUG: Loading file:', htmlPath)
+    mainWindow.loadFile(htmlPath)
   }
+  console.error('DEBUG: createWindow() returning')
   return mainWindow
 }
 
-// Single instance lock - prevents multiple app instances
-// and handles reopening when app is already running
-const gotTheLock = app.requestSingleInstanceLock()
+// Single instance lock - TEMPORARILY DISABLED FOR DEBUGGING
+// const gotTheLock = app.requestSingleInstanceLock()
 
-if (!gotTheLock) {
-  // Another instance is already running, quit this one
-  app.quit()
-} else {
-  // Store mainWindow reference for second-instance handler
-  let mainWindowRef: BrowserWindow | null = null
+// if (!gotTheLock) {
+//   // Another instance is already running, quit this one
+//   app.quit()
+// } else {
+  // Store mainWindow reference for second-instance handler (TEMP DISABLED)
+  // let mainWindowRef: BrowserWindow | null = null
 
-  app.on('second-instance', () => {
-    // Someone tried to run a second instance, focus our window
-    if (mainWindowRef) {
-      if (mainWindowRef.isMinimized()) mainWindowRef.restore()
-      mainWindowRef.focus()
-    }
-  })
+  // app.on('second-instance', () => {
+  //   // Someone tried to run a second instance, focus our window
+  //   if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+  //     if (mainWindowRef.isMinimized()) mainWindowRef.restore()
+  //     mainWindowRef.focus()
+  //   } else {
+  //     // Window was closed but process still running, quit app
+  //     app.quit()
+  //   }
+  // })
 
   // This method will be called when Electron has finished
   // initialization and is ready to create browser windows.
   // Some APIs can only be used after this event occurs.
-  app.whenReady().then(async () => {
-    // Wait for Widevine CDM to be ready (castLabs fork only)
-    if (components && components.whenReady) {
-      await components.whenReady()
-    }
+  console.error('DEBUG: Registering app.whenReady()')
+  app.whenReady().then(() => {
+    console.error('DEBUG: app.whenReady() resolved')
 
   // Set app user model id for windows
   app.setAppUserModelId('com.electron')
@@ -100,8 +117,14 @@ if (!gotTheLock) {
 
 
   const mainWindow = createWindow()
-  mainWindowRef = mainWindow
+  // mainWindowRef = mainWindow // TEMP DISABLED
   const viewManager = new ViewManager(mainWindow, app.getAppPath())
+
+  // Cleanup all views when window is closed
+  mainWindow.on('close', () => {
+    viewManager.destroyAll()
+    // mainWindowRef = null  // TEMP DISABLED
+  })
 
   // Downloads storage - must be before download tracking
   let downloadsStore: unknown[] = []
@@ -403,21 +426,16 @@ if (!gotTheLock) {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) {
-      const newWindow = createWindow()
-      mainWindowRef = newWindow
+      createWindow()
     }
   })
 
-  // Quit when all windows are closed, except on macOS. There, it's common
-  // for applications and their menu bar to stay active until the user quits
-  // explicitly with Cmd + Q.
+  // Quit when all windows are closed
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      app.quit()
-    }
+    app.quit()
   })
 })
-}
 
 // In this file you can include the rest of your app's specific main process
+// code. You can also put them in separate files and require them here.
 // code. You can also put them in separate files and require them here.

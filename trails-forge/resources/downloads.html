@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Downloads</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #E0E0E0;
+            padding: 40px;
+            min-height: 100vh;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 500;
+            margin-bottom: 32px;
+            color: #FC93AD;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .btn {
+            background: #2a2a2a;
+            color: #E0E0E0;
+            border: 1px solid #444444;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #3a3a3a;
+        }
+
+        .downloads-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .download-item {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .download-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .download-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .download-name {
+            font-size: 15px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .download-url {
+            font-size: 12px;
+            color: #B0B0B0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .download-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .action-btn {
+            background: #2a2a2a;
+            border: none;
+            color: #E0E0E0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #3a3a3a;
+        }
+
+        .action-btn.primary {
+            background: #FC93AD;
+            color: #121212;
+        }
+
+        .action-btn.primary:hover {
+            background: #FDA1B8;
+        }
+
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: #444444;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #FC93AD;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .progress-fill.completed {
+            background: #22c55e;
+        }
+
+        .progress-fill.failed {
+            background: #ef4444;
+        }
+
+        .progress-text {
+            font-size: 12px;
+            color: #B0B0B0;
+            min-width: 60px;
+            text-align: right;
+        }
+
+        .download-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .status-badge.progressing {
+            background: rgba(252, 147, 173, 0.2);
+            color: #FC93AD;
+        }
+
+        .status-badge.interrupted {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .status-badge.cancelled {
+            background: rgba(176, 176, 176, 0.2);
+            color: #B0B0B0;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #B0B0B0;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #E0E0E0;
+        }
+
+        .download-meta {
+            font-size: 12px;
+            color: #B0B0B0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        Downloads
+    </h1>
+
+    <div class="header-actions">
+        <button class="btn" onclick="openDownloadsFolder()">Open Downloads Folder</button>
+        <button class="btn" onclick="clearAllDownloads()">Clear All</button>
+    </div>
+
+    <div id="downloads-list" class="downloads-list">
+        <div class="empty-state">
+            <div class="empty-illustration">
+                <!-- Download arrow scribble illustration -->
+                <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+                    <path d="M40 5 L40 40" stroke="#FC93AD" stroke-width="3" stroke-linecap="round" />
+                    <path d="M25 30 L40 45 L55 30" stroke="#FC93AD" stroke-width="3" stroke-linecap="round"
+                        stroke-linejoin="round" fill="none" />
+                    <path d="M15 55 Q 40 50, 65 55" stroke="#FC93AD" stroke-width="2.5" stroke-linecap="round"
+                        fill="none" opacity="0.5" />
+                </svg>
+            </div>
+            <h2>No downloads yet</h2>
+            <p>Your downloads will appear here</p>
+        </div>
+    </div>
+
+    <script>
+        let downloads = [];
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatDate(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function renderDownloads() {
+            const container = document.getElementById('downloads-list');
+
+            if (downloads.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-illustration">
+                            <!-- Download arrow scribble illustration -->
+                            <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+                                <path d="M40 5 L40 40" stroke="#FC93AD" stroke-width="3" stroke-linecap="round"/>
+                                <path d="M25 30 L40 45 L55 30" stroke="#FC93AD" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                <path d="M15 55 Q 40 50, 65 55" stroke="#FC93AD" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+                            </svg>
+                        </div>
+                        <h2>No downloads yet</h2>
+                        <p>Your downloads will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = downloads.map(d => {
+                const progress = d.totalBytes > 0 ? Math.round((d.receivedBytes / d.totalBytes) * 100) : 0;
+                const statusClass = d.state === 'completed' ? 'completed' : d.state === 'interrupted' ? 'failed' : '';
+
+                let actionsHtml = '';
+                if (d.state === 'completed') {
+                    actionsHtml = `
+                        <button class="action-btn primary" onclick="openFile('${d.savePath.replace(/\\/g, '\\\\')}')">Open</button>
+                        <button class="action-btn" onclick="showInFolder('${d.savePath.replace(/\\/g, '\\\\')}')">Show in Folder</button>
+                    `;
+                }
+                actionsHtml += `<button class="action-btn" onclick="removeDownload('${d.id}')">Remove</button>`;
+
+                return `
+                    <div class="download-item">
+                        <div class="download-header">
+                            <div class="download-info">
+                                <div class="download-name">${d.filename}</div>
+                                <div class="download-url">${d.url}</div>
+                                <div class="download-meta">${formatDate(d.startTime)} • ${formatBytes(d.totalBytes || d.receivedBytes)}</div>
+                            </div>
+                            <div class="download-actions">
+                                ${actionsHtml}
+                            </div>
+                        </div>
+                        <div class="download-status">
+                            <span class="status-badge ${d.state}">${d.state === 'progressing' ? 'Downloading' : d.state.charAt(0).toUpperCase() + d.state.slice(1)}</span>
+                            ${d.state === 'progressing' ? `
+                                <div class="progress-container" style="flex:1">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: ${progress}%"></div>
+                                    </div>
+                                    <span class="progress-text">${progress}%</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openFile(path) {
+            if (window.downloadsAPI) {
+                window.downloadsAPI.openFile(path);
+            }
+        }
+
+        function showInFolder(path) {
+            if (window.downloadsAPI) {
+                window.downloadsAPI.showInFolder(path);
+            }
+        }
+
+        function removeDownload(id) {
+            downloads = downloads.filter(d => d.id !== id);
+            renderDownloads();
+            if (window.downloadsAPI) {
+                window.downloadsAPI.removeDownload(id);
+            }
+        }
+
+        function clearAllDownloads() {
+            downloads = [];
+            renderDownloads();
+            if (window.downloadsAPI) {
+                window.downloadsAPI.clearAll();
+            }
+        }
+
+        function openDownloadsFolder() {
+            if (window.downloadsAPI) {
+                window.downloadsAPI.openDownloadsFolder();
+            }
+        }
+
+        // Get downloads from main process
+        if (window.downloadsAPI) {
+            window.downloadsAPI.getDownloads().then(data => {
+                downloads = data || [];
+                renderDownloads();
+            });
+        }
+    </script>
+</body>
+
+</html>

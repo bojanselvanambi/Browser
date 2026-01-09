@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: trails-browser
+productName: Trails
 directories:
   buildResources: build
 files:
@@ -13,11 +13,14 @@ asarUnpack:
   - resources/**
 win:
   executableName: trails-browser
+  icon: build/icons/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  installerIcon: build/icons/icon.ico
+  uninstallerIcon: build/icons/icon.ico
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
