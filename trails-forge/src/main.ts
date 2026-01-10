@@ -3,6 +3,32 @@ import path from 'path'
 import fs from 'fs'
 import started from 'electron-squirrel-startup'
 import ViewManager from './ViewManager'
+import { shouldBlockUrl } from './trackerList'
+import { cleanUrl } from './urlCleaner'
+
+// ============= PERFORMANCE OPTIMIZATION =============
+// Enable GPU acceleration and hardware rendering
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-accelerated-video-decode')
+app.commandLine.appendSwitch('enable-accelerated-mjpeg-decode')
+
+// V8 optimizations for faster JavaScript execution
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096 --optimize-for-size')
+
+// Smooth scrolling and rendering
+app.commandLine.appendSwitch('enable-smooth-scrolling')
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiVideoEncoder')
+
+// Reduce memory footprint
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+
+// ============= PRIVACY CONFIGURATION =============
+// Disable telemetry and reporting
+app.commandLine.appendSwitch('disable-features', 'Reporting,CrashReporting,MetricsReportingService')
+app.commandLine.appendSwitch('disable-breakpad') // Disable crash reporter
+app.commandLine.appendSwitch('no-pings') // Disable hyperlink auditing
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -15,10 +41,16 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 
 function createWindow(): BrowserWindow {
   console.error('DEBUG: createWindow() called')
+  // Determine icon path based on environment
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.ico')
+    : path.join(__dirname, '../../resources/icon.ico')
+
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
+    icon: iconPath,
     show: true,
     autoHideMenuBar: true,
     backgroundMaterial: 'acrylic',  // Windows 11 native acrylic blur
@@ -35,7 +67,12 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, 'preload.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Performance optimizations for main UI
+      backgroundThrottling: false,  // Keep main UI responsive
+      webgl: true,  // Enable WebGL for GPU acceleration
+      enableBlinkFeatures: 'AcceleratedSmallCanvases',  // GPU accelerate canvases
+      v8CacheOptions: 'bypassHeatCheck'  // Aggressive V8 caching
     }
   })
 
@@ -68,7 +105,70 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   // Set app user model id for windows
-  app.setAppUserModelId('com.electron')
+  app.setAppUserModelId('com.trails.browser')
+
+  // Settings state
+  let currentSettings: any = { 
+    searchEngine: 'perplexity', 
+    adblockEnabled: true,
+    clearUrls: false,
+    scrollToTop: false,
+    cookieConsentHider: false,
+    canvasDefender: false,
+    hoverZoom: false,
+    sponsorBlock: false,
+    fastForward: false
+  }
+
+  // ============= PRIVACY: Session Configuration =============
+  const defaultSession = session.defaultSession
+  
+  // Block third-party cookies
+  defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const requestHeaders = { ...details.requestHeaders }
+    
+    // Set strict referrer policy
+    if (requestHeaders['Referer']) {
+      try {
+        const refererUrl = new URL(requestHeaders['Referer'])
+        const requestUrl = new URL(details.url)
+        // Only send referrer to same origin
+        if (refererUrl.origin !== requestUrl.origin) {
+          requestHeaders['Referer'] = requestUrl.origin + '/'
+        }
+      } catch {
+        // Invalid URL, remove referer
+        delete requestHeaders['Referer']
+      }
+    }
+    
+    // Remove tracking headers
+    delete requestHeaders['X-Client-Data']
+    
+    callback({ requestHeaders })
+  })
+  
+  // Block known tracker requests & ClearURLs
+  defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    // 1. Block Trackers
+    if (shouldBlockUrl(details.url)) {
+      console.log('[PRIVACY] Blocked tracker:', details.url.substring(0, 80))
+      callback({ cancel: true })
+      return
+    }
+
+    // 2. ClearURLs
+    if (currentSettings.clearUrls) {
+      const cleaned = cleanUrl(details.url)
+      if (cleaned !== details.url) {
+        console.log('[ClearURLs] Cleaned:', details.url, '->', cleaned)
+        callback({ redirectURL: cleaned })
+        return
+      }
+    }
+
+    callback({})
+  })
 
   app.on('browser-window-created', (_, window) => {
     window.webContents.on('before-input-event', (event, input) => {
@@ -207,6 +307,38 @@ app.whenReady().then(() => {
     }
   })
 
+  // Adblock toggle handler
+  ipcMain.on('adblock:set', (_, enabled: boolean) => {
+    console.log('[ADBLOCK] Toggle requested:', enabled)
+    if (!enabled && uBlockId) {
+      // Disable: remove extension (synchronous)
+      try {
+        trailsSession.removeExtension(uBlockId)
+        console.log('[ADBLOCK] Extension disabled')
+        uBlockId = null
+      } catch (e) {
+        console.error('[ADBLOCK] Failed to disable:', e)
+      }
+    } else if (enabled && !uBlockId) {
+      // Enable: reload extension
+      if (fs.existsSync(extPath)) {
+        trailsSession.loadExtension(extPath).then((ext: { id: string }) => {
+          uBlockId = ext.id
+          console.log('[ADBLOCK] Extension re-enabled, ID:', uBlockId)
+        }).catch((e: Error) => console.error('[ADBLOCK] Failed to enable:', e))
+      }
+    }
+  })
+
+  // Password auto-detect handler - forward to main renderer for save prompt
+  ipcMain.on('password-detected', (_, data: { website: string; url: string; username: string; password: string }) => {
+    console.log('[PASSWORD] Detected login for:', data.website, 'username:', data.username)
+    // Forward to main renderer window
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('password-detected', data)
+    }
+  })
+
   ipcMain.on('view-media-update', (event, data) => {
     const viewId = viewManager.getViewIdByWebContents(event.sender)
     if (viewId && !mainWindow.isDestroyed()) {
@@ -277,7 +409,7 @@ app.whenReady().then(() => {
     return 'file://' + settingsPath.replace(/\\/g, '/')
   })
 
-  let currentSettings = { searchEngine: 'grok', adblockEnabled: true }
+  // Settings are defined at top of readiness block now
 
   ipcMain.handle('settings:get', async () => {
     return currentSettings
@@ -291,6 +423,15 @@ app.whenReady().then(() => {
   ipcMain.on('settings:setAdblock', (_, enabled) => {
     currentSettings.adblockEnabled = enabled
     mainWindow.webContents.send('settings:adblockChanged', enabled)
+  })
+
+  // Generic settings update from renderer
+  ipcMain.on('settings:update', (_, settings) => {
+    // Merge updates
+    currentSettings = { ...currentSettings, ...settings }
+    // Broadcast to views
+    viewManager.broadcast('settings:update', currentSettings)
+    // Also update main window if needed, though it sent it
   })
 
   ipcMain.handle('downloads:getPath', async () => {

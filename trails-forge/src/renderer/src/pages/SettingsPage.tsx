@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 
-type SearchEngine = 'grok' | 'google' | 'duckduckgo' | 'bing' | 'ecosia'
+type SearchEngine = 'perplexity' | 'google' | 'duckduckgo' | 'bing' | 'ecosia'
 
 declare global {
     interface Window {
@@ -13,7 +13,7 @@ declare global {
 }
 
 const SettingsPage: React.FC = () => {
-    const [searchEngine, setSearchEngine] = useState<SearchEngine>('grok')
+    const [searchEngine, setSearchEngine] = useState<SearchEngine>('perplexity')
     const [adblockEnabled, setAdblockEnabled] = useState(true)
     const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
@@ -71,7 +71,7 @@ const SettingsPage: React.FC = () => {
                         onChange={handleSearchEngineChange}
                         style={{ background: '#2a2a2a', color: '#E0E0E0', border: '1px solid #444444', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', minWidth: '150px' }}
                     >
-                        <option value="grok">Grok</option>
+                        <option value="perplexity">Perplexity</option>
                         <option value="google">Google</option>
                         <option value="duckduckgo">DuckDuckGo</option>
                         <option value="bing">Bing</option>

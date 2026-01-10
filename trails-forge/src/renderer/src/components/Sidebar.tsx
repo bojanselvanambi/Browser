@@ -1,8 +1,12 @@
-import React, { useState, useRef, useEffect, useContext, createContext, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useContext, createContext, useMemo, useCallback } from 'react'
 import { TrailNode, ClosedTrailEntry, DownloadItem, Settings, SearchEngine, MediaState, PinnedTab } from '../types'
 import { VirtualizedTrailList, FlattenedItem } from './VirtualizedTrailList'
 import { MiniPlayer } from './MiniPlayer'
 import { PinnedTabs } from './PinnedTabs'
+import { SearchSuggestions } from './SearchSuggestions'
+import { BookmarkSheet } from './BookmarkSheet'
+import { PasswordManagerSheet } from './PasswordManagerSheet'
+import { loadBookmarks, addBookmark, deleteBookmark, isBookmarked, getBookmarkByUrl } from '../stores/bookmarkStore'
 import {
     PlusIcon,
     CrossIcon,
@@ -418,6 +422,9 @@ interface SideBarProps {
     adblockEnabled: boolean
     onToggleAdblock: () => void
 
+    // Generic Settings Toggle
+    onToggleSetting: (key: keyof Settings) => void
+
     // History clear
     onClearHistoryItem: (id: string) => void
     onClearAllHistory: () => void
@@ -438,12 +445,30 @@ interface SideBarProps {
     onClickPinnedTab: (id: string) => void
     onUnpinTab: (id: string) => void
     onPinTab: (url: string, title: string, favicon?: string) => void
+
+    // Bookmark Sheet
+    showBookmarkSheet: boolean
+    onCloseBookmarkSheet: () => void
+    onNavigateBookmark: (url: string) => void
+
+    // Password Manager Sheet
+    showPasswordSheet: boolean
+    onClosePasswordSheet: () => void
 }
 
-const NewTrailInput = ({ onAdd }: { onAdd: (url?: string) => void }) => {
+interface NewTrailInputProps {
+    onAdd: (url?: string) => void
+    nodes: Record<string, TrailNode>
+    closedTrails: ClosedTrailEntry[]
+}
+
+const NewTrailInput = ({ onAdd, nodes, closedTrails }: NewTrailInputProps) => {
     const [isAdding, setIsAdding] = useState(false)
     const [value, setValue] = useState('')
+    const [selectedIndex, setSelectedIndex] = useState(0)
+    const [showSuggestions, setShowSuggestions] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         if (isAdding && inputRef.current) {
@@ -451,24 +476,56 @@ const NewTrailInput = ({ onAdd }: { onAdd: (url?: string) => void }) => {
         }
     }, [isAdding])
 
-    const handleSubmit = () => {
-        if (value.trim()) {
-            onAdd(value.trim())
+    const handleSubmit = useCallback((url?: string) => {
+        const submitValue = url || value.trim()
+        if (submitValue) {
+            onAdd(submitValue)
         } else {
             onAdd() // Default new tab
         }
         setIsAdding(false)
         setValue('')
-    }
+        setShowSuggestions(false)
+    }, [value, onAdd])
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        // If suggestions are shown, let them handle arrow keys
+        if (showSuggestions && value.length > 0) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                return // Let SearchSuggestions handle this via selectedIndex
+            }
+        }
+
         if (e.key === 'Enter') {
+            e.preventDefault()
             handleSubmit()
         } else if (e.key === 'Escape') {
             setIsAdding(false)
             setValue('')
+            setShowSuggestions(false)
         }
-    }
+    }, [handleSubmit, showSuggestions, value])
+
+    const handleSuggestionSelect = useCallback((url: string) => {
+        handleSubmit(url)
+    }, [handleSubmit])
+
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        setValue(e.target.value)
+        setShowSuggestions(e.target.value.length > 0)
+    }, [])
+
+    // Global keyboard handler for suggestion navigation
+    useEffect(() => {
+        if (!showSuggestions || !isAdding) return
+
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            // Not handled here - delegated to SearchSuggestions
+        }
+
+        document.addEventListener('keydown', handleGlobalKeyDown)
+        return () => document.removeEventListener('keydown', handleGlobalKeyDown)
+    }, [showSuggestions, isAdding])
 
     if (!isAdding) {
         return (
@@ -498,25 +555,44 @@ const NewTrailInput = ({ onAdd }: { onAdd: (url?: string) => void }) => {
     }
 
     return (
-        <div style={{
-            padding: '8px',
-            marginTop: '8px',
-            borderTop: '1px solid #333'
-        }}>
+        <div
+            ref={containerRef}
+            style={{
+                padding: '8px',
+                marginTop: '8px',
+                borderTop: '1px solid #333',
+                position: 'relative'
+            }}
+        >
             <input
                 ref={inputRef}
                 type="text"
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onChange={handleInputChange}
+                onKeyDown={(e) => {
+                    // Handle arrow keys for suggestions
+                    if (showSuggestions && value.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault()
+                            setSelectedIndex(prev => prev + 1)
+                        } else if (e.key === 'ArrowUp') {
+                            e.preventDefault()
+                            setSelectedIndex(prev => Math.max(0, prev - 1))
+                        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+                            // Will be handled by SearchSuggestions select callback
+                        }
+                    }
+                    handleKeyDown(e)
+                }}
                 onBlur={() => {
-                    // Optional: close on blur if empty? 
-                    // Better to keep open if user clicks away temporarily or keep logic simple
-                    // Let's close if empty, but keep if typed?
-                    // User might lose work. Let's just keep it open or close on Escape.
-                    // Actually, usually these things close on blur.
-                    // Let's close.
-                    if (!value) setIsAdding(false)
+                    // Delay to allow click on suggestion
+                    setTimeout(() => {
+                        if (!value) setIsAdding(false)
+                        setShowSuggestions(false)
+                    }, 200)
+                }}
+                onFocus={() => {
+                    if (value.length > 0) setShowSuggestions(true)
                 }}
                 placeholder="Search or enter URL..."
                 style={{
@@ -529,6 +605,17 @@ const NewTrailInput = ({ onAdd }: { onAdd: (url?: string) => void }) => {
                     padding: '6px 8px',
                     outline: 'none'
                 }}
+            />
+
+            <SearchSuggestions
+                query={value}
+                isVisible={showSuggestions && value.length > 0}
+                onSelect={handleSuggestionSelect}
+                onClose={() => setShowSuggestions(false)}
+                nodes={nodes}
+                closedTrails={closedTrails}
+                selectedIndex={selectedIndex}
+                onSelectedIndexChange={setSelectedIndex}
             />
         </div>
     )
@@ -565,6 +652,7 @@ export function Sidebar({
     onBulkDelete: _onBulkDelete,
     adblockEnabled,
     onToggleAdblock,
+    onToggleSetting,
     onClearHistoryItem,
     onClearAllHistory,
     onMediaPlay,
@@ -578,7 +666,12 @@ export function Sidebar({
     activePinnedTabId,
     onClickPinnedTab,
     onUnpinTab,
-    onPinTab
+    onPinTab,
+    showBookmarkSheet,
+    onCloseBookmarkSheet,
+    onNavigateBookmark,
+    showPasswordSheet,
+    onClosePasswordSheet
 }: SideBarProps) {
     const [sidebarWidth, setSidebarWidth] = useState(280)
     const [isResizing, setIsResizing] = useState(false)
@@ -890,7 +983,7 @@ export function Sidebar({
                     {/* New Trails Button - inside scrollable area with separator */}
 
                     {/* New Trail Input / Button */}
-                    <NewTrailInput onAdd={onAddTrail} />
+                    <NewTrailInput onAdd={onAddTrail} nodes={nodes} closedTrails={closedTrails} />
                 </div>
 
                 {/* History Panel */}
@@ -1092,7 +1185,7 @@ export function Sidebar({
                                 onChange={(e) => onSetSearchEngine(e.target.value as SearchEngine)}
                                 style={{ width: '100%' }}
                             >
-                                <option value="grok">Grok</option>
+                                <option value="perplexity">Perplexity</option>
                                 <option value="google">Google</option>
                                 <option value="duckduckgo">DuckDuckGo</option>
                                 <option value="bing">Bing</option>
@@ -1125,6 +1218,46 @@ export function Sidebar({
                                     }} />
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Native Extensions / Features */}
+                        <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', color: '#B0B0B0' }}>
+                                Privacy & Tools
+                            </label>
+
+                            {[
+                                { key: 'scrollToTop', label: 'Scroll to Top' },
+                                { key: 'clearUrls', label: 'ClearURLs (Remove Tracking)' },
+                                { key: 'cookieConsentHider', label: 'Cookie Consent Hider' },
+                                { key: 'canvasDefender', label: 'Canvas Defender' },
+                                { key: 'hoverZoom', label: 'Hover Zoom+' },
+                                { key: 'sponsorBlock', label: 'SponsorBlock (YouTube)' },
+                                { key: 'fastForward', label: 'FastForward (Bypass Links)' },
+                            ].map(({ key, label }) => (
+                                <div
+                                    key={key}
+                                    onClick={() => onToggleSetting(key as keyof Settings)}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        padding: '8px', background: '#111', borderRadius: '4px', cursor: 'pointer',
+                                        border: '1px solid #333', marginBottom: '6px'
+                                    }}
+                                >
+                                    <span style={{ fontSize: '13px' }}>{label}</span>
+                                    <div style={{
+                                        width: '32px', height: '18px', borderRadius: '9px',
+                                        background: settings[key as keyof Settings] ? '#FC93AD' : '#444',
+                                        position: 'relative', transition: '0.2s'
+                                    }}>
+                                        <div style={{
+                                            width: '14px', height: '14px', borderRadius: '50%', background: 'white',
+                                            position: 'absolute', top: '2px', left: settings[key as keyof Settings] ? '16px' : '2px',
+                                            transition: '0.2s'
+                                        }} />
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
 
@@ -1162,6 +1295,40 @@ export function Sidebar({
                                 label: nodes[contextMenu.nodeId]?.isLocked ? 'Unlock' : 'Lock',
                                 onClick: () => onToggleLock(contextMenu.nodeId),
                                 icon: nodes[contextMenu.nodeId]?.isLocked ? <UnlockIcon /> : <LockIcon />
+                            },
+                            {
+                                label: (() => {
+                                    const node = nodes[contextMenu.nodeId];
+                                    if (node && node.url) {
+                                        const state = loadBookmarks();
+                                        return isBookmarked(state, node.url) ? 'Remove Bookmark' : 'Add Bookmark';
+                                    }
+                                    return 'Add Bookmark';
+                                })(),
+                                onClick: () => {
+                                    const node = nodes[contextMenu.nodeId];
+                                    if (node && node.url && node.type === 'link') {
+                                        const state = loadBookmarks();
+                                        if (isBookmarked(state, node.url)) {
+                                            const bookmark = getBookmarkByUrl(state, node.url);
+                                            if (bookmark) {
+                                                deleteBookmark(state, bookmark.id);
+                                            }
+                                        } else {
+                                            addBookmark(state, node.url, node.title || node.url, undefined, [], node.favicon);
+                                        }
+                                    }
+                                },
+                                icon: (() => {
+                                    const node = nodes[contextMenu.nodeId];
+                                    if (node && node.url) {
+                                        const state = loadBookmarks();
+                                        if (isBookmarked(state, node.url)) {
+                                            return <svg width="14" height="14" viewBox="0 0 16 16" fill="#FC93AD"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z" /></svg>;
+                                        }
+                                    }
+                                    return <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z" /></svg>;
+                                })()
                             },
                             {
                                 label: 'Pin Tab',
@@ -1205,6 +1372,23 @@ export function Sidebar({
                         onClickTrail={() => onNodeClick(currentMedia.trailId)}
                     />
                 )}
+
+                {/* Bookmark Sheet - inside sidebar */}
+                <BookmarkSheet
+                    isOpen={showBookmarkSheet}
+                    onClose={onCloseBookmarkSheet}
+                    currentUrl={activeNodeId ? nodes[activeNodeId]?.url : undefined}
+                    currentTitle={activeNodeId ? nodes[activeNodeId]?.title : undefined}
+                    currentFavicon={activeNodeId ? nodes[activeNodeId]?.favicon : undefined}
+                    onNavigate={onNavigateBookmark}
+                />
+
+                {/* Password Manager Sheet - inside sidebar */}
+                <PasswordManagerSheet
+                    isOpen={showPasswordSheet}
+                    onClose={onClosePasswordSheet}
+                    currentUrl={activeNodeId ? nodes[activeNodeId]?.url : undefined}
+                />
             </div>
         </SidebarContext.Provider >
     )

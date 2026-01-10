@@ -1,10 +1,11 @@
 {
   "name": "trails",
-  "productName": "Trails",
-  "version": "1.0.0",
+  "productName": "Trails Browser",
+  "version": "1.0.4",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('out', {recursive: true, force: true}); require('fs').rmSync('.vite', {recursive: true, force: true})\"",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
@@ -32,13 +33,17 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "electron": "39.2.7",
+    "png-to-ico": "^3.0.1",
     "typescript": "^5.9.3",
     "vite": "^5.4.21"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@types/crypto-js": "^4.2.2",
+    "argon2-browser": "^1.18.0",
     "clsx": "^2.1.1",
+    "crypto-js": "^4.2.0",
     "electron-squirrel-startup": "^1.0.1",
     "emoji-picker-react": "^4.16.1",
     "framer-motion": "^12.24.12",

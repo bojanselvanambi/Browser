@@ -99,3 +99,14 @@ export const SidebarIcon = () => (
     <svg viewBox="0 0 24 24" {...iconProps}><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="9" y1="3" x2="9" y2="21" /></svg>
 )
 
+export const StarIcon = () => (
+    <svg viewBox="0 0 24 24" {...iconProps}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+)
+
+export const StarFilledIcon = () => (
+    <svg viewBox="0 0 24 24" {...iconProps} fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+)
+
+export const KeyIcon = () => (
+    <svg viewBox="0 0 24 24" {...iconProps}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
+)

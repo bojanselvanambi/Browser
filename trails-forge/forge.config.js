@@ -1,10 +1,11 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+const path = require('path');
 
 module.exports = {
   packagerConfig: {
     asar: true,
-    icon: 'resources/icon',
+    icon: path.resolve(__dirname, 'resources/icon'),
     extraResource: [
       './resources/settings.html',
       './resources/downloads.html',
@@ -14,7 +15,8 @@ module.exports = {
       './resources/archive-preload.js',
       './resources/media-inject.js',
       './resources/view-preload.js',
-      './resources/adblock'
+      './resources/adblock',
+      './resources/icon.ico'
     ]
   },
   rebuildConfig: {},
@@ -22,7 +24,8 @@ module.exports = {
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        setupIcon: './resources/icon.ico'
+        setupIcon: path.resolve(__dirname, 'resources/icon.ico'),
+        iconUrl: 'https://raw.githubusercontent.com/electron/electron/master/default_app/icon.ico' // Fallback/Placeholder if needed, but local setupIcon should take precedence for the file. The local one is critical.
       },
     },
     {

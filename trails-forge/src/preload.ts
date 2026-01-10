@@ -49,6 +49,8 @@ const api = {
     onAdblockDebug: (callback: (event: unknown, data: unknown) => void) =>
       ipcRenderer.on('adblock-debug', callback),
     getAdblockDebug: () => ipcRenderer.invoke('get-adblock-debug'),
+    onPasswordDetected: (callback: (event: unknown, data: { website: string; url: string; username: string; password: string }) => void) =>
+      ipcRenderer.on('password-detected', callback),
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('view-title-updated')
       ipcRenderer.removeAllListeners('view-navigated')

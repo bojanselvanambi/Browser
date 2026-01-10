@@ -42,7 +42,7 @@ export interface MediaState {
   duration: number
 }
 
-export type SearchEngine = 'grok' | 'google' | 'duckduckgo' | 'bing' | 'ecosia'
+export type SearchEngine = 'perplexity' | 'google' | 'duckduckgo' | 'bing' | 'ecosia'
 
 export type ContentTheme = 'default' | 'light' | 'dark'
 
@@ -50,10 +50,23 @@ export interface Settings {
   searchEngine: SearchEngine
   extensionPaths?: string[]
   contentTheme: ContentTheme
+  // Privacy settings
+  blockTrackers: boolean      // Block known tracking domains (default: true)
+  blockFingerprinting: boolean // Block fingerprinting scripts (default: true)
+  strictReferrer: boolean     // Only send same-origin referrer (default: true)
+  
+  // Native Extensions / Features
+  scrollToTop: boolean
+  clearUrls: boolean
+  cookieConsentHider: boolean
+  canvasDefender: boolean
+  hoverZoom: boolean
+  sponsorBlock: boolean
+  fastForward: boolean
 }
 
 export const SEARCH_ENGINE_URLS: Record<SearchEngine, string> = {
-  grok: 'https://grok.com/?q=',
+  perplexity: 'https://www.perplexity.ai/search?q=',
   google: 'https://www.google.com/search?q=',
   duckduckgo: 'https://duckduckgo.com/?q=',
   bing: 'https://www.bing.com/search?q=',

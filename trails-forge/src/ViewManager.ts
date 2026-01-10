@@ -74,8 +74,19 @@ class ViewManager {
         contextIsolation: true,
         sandbox: isInternalPage ? false : true,
         partition,
-
-        preload: preloadPath || path.join(resourcesPath, 'view-preload.js')
+        // Privacy: Disable automation detection
+        disableBlinkFeatures: 'AutomationControlled',
+        // Privacy: Disable remote content unless necessary
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        // Enable spellcheck
+        spellcheck: true,
+        preload: preloadPath || path.join(resourcesPath, 'view-preload.js'),
+        // Performance optimizations
+        backgroundThrottling: true,  // Throttle inactive tabs
+        enableWebSQL: false,  // Disable deprecated WebSQL
+        webgl: true,  // Enable WebGL acceleration
+        enableBlinkFeatures: 'AcceleratedSmallCanvases'  // GPU accelerate small canvases
       }
     })
 
@@ -468,6 +479,18 @@ class ViewManager {
       }
     }
     return undefined
+  }
+
+  broadcast(channel: string, ...args: any[]) {
+    this.views.forEach(view => {
+      try {
+        if (!view.webContents.isDestroyed()) {
+          view.webContents.send(channel, ...args)
+        }
+      } catch (e) {
+        console.error('Failed to broadcast to view', e)
+      }
+    })
   }
 
   // Destroy all views - call on app close for proper cleanup
